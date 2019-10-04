@@ -1,0 +1,173 @@
+from selenium import webdriver
+from selenium.webdriver import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.select import Select
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoAlertPresentException
+from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import ElementClickInterceptedException
+from selenium.common.exceptions import UnexpectedAlertPresentException
+from selenium.common.exceptions import StaleElementReferenceException
+from selenium.common.exceptions import NoSuchElementException
+from datetime import timedelta, date
+from dateutil.relativedelta import relativedelta
+import numpy as np
+import pandas as pd
+import datetime
+import timeit
+import time
+
+#THIS IS THE FIRST PART OF THE SCRIPT
+#IT WILL OPEN THE WEBSITE IN A NEW BROWSER WINDOW AND SET THE OPTIONS WHICH WILL NOT BE CHANGED ONCE THE DATA COLLECTION BEGINS
+
+driver = webdriver.Chrome()
+driver.get('http://www.nhb.gov.in/OnlineClient/MISDailyReport.aspx')
+Category = Select(driver.find_element_by_name("ctl00$ContentPlaceHolder1$drpCategoryName"))
+Category.select_by_visible_text("VEGETABLES")
+#Is wait required?
+time.sleep(1)
+Crop = Select(driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_drpCropName"]'))
+Crop.select_by_visible_text("POTATO")
+Select_All = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_btSelectAll"]')
+Select_All.click()
+Date = driver.find_element_by_name('ctl00$ContentPlaceHolder1$txtdate')
+table_check = None
+error_check = None
+ColumnNames = ['S.No.','Centre Name','Variety','MinPrice(Rs/Qtl)','MaxPrice(Rs/Qtl)','ModalPrice(Rs/Qtl)','Arrival(M.T.)','RetailPrice(Rs/Qtl)','Date']
+final = pd.DataFrame(columns=ColumnNames)
+final = final[ColumnNames]
+records = np.array([])
+
+#THIS IS THE END OF THE FIRST PART
+#WAIT UNTIL YOU SEE ALL THE CENTRES SELECTED IN CENTRE LIST
+
+#THIS IS THE SECOND PART
+#THIS IS TO BE EXECUTED SEPARATELY AND AFTER THE FIRST PART
+
+#Checks for the disappearance of OuterTableCellOverlay before finding the Search button
+def check_exists_by_xpath(xpath):
+    try:
+        driver.find_element_by_xpath(xpath)
+    except NoSuchElementException:
+        return False
+    return True
+
+#dates function will return a list of all the dates of a month in required format    
+def dates(start_date,end_date):
+    IterDate = list()
+    for i in [d for d in (start_date + timedelta(n) for n in range(day_count)) if d <= (end_date)]:
+        day = (2-len(str(i.day)))*'0'+ str(i.day)
+        month = (2-len(str(i.month)))*'0'+str(i.month)
+        year = str(i.year)
+        final_date = day+'/'+month+'/'+year
+        IterDate.extend([final_date])
+    return IterDate
+
+#Main function
+def WebScraper():
+    ColumnNames = ['S.No.','Centre Name','Variety','MinPrice(Rs/Qtl)','MaxPrice(Rs/Qtl)','ModalPrice(Rs/Qtl)','Arrival(M.T.)','RetailPrice(Rs/Qtl)','Date']
+    final_dataset = pd.DataFrame(columns=ColumnNames)
+    final_dataset = final_dataset[ColumnNames]
+    j=0
+    global table_check
+    global error_check
+    while j<(day_count):
+        Date = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_txtdate"]')
+        Date.send_keys(Keys.CONTROL + "a")
+        Date.send_keys(Keys.BACKSPACE)
+        Date = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_txtdate"]')
+        Date.send_keys(date[j])
+        print(date[j])
+            
+        while True:
+            try:
+                element = WebDriverWait(driver, 1).until(EC.visibility_of_element_located((By.ID,"OuterTableCellOverlay")))   
+            except:
+                break
+                
+        try:
+            driver.find_element_by_css_selector('#ctl00_ContentPlaceHolder1_btnSearch').click()
+            print("Search Button was clicked")
+        except UnexpectedAlertPresentException:
+            alert = driver.switch_to.alert
+            alert.accept()
+            print('We are inside the EXCEPT condition')
+            continue
+            
+        time.sleep(3)
+        
+        if check_exists_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_lblMessageError"]')==True:
+            time.sleep(1)
+            try:
+                error = driver.find_element_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_lblMessageError"]')
+                error_check = error.text
+            except NoSuchElementException:
+                print("Ran into MONDAY issue, breaking the loop, iteration will continue from this date.")
+                continue
+            print("No records for this date were found!")
+            j=j+1
+        else:
+            Table = driver.find_elements_by_xpath('//*[@id="ctl00_ContentPlaceHolder1_GridViewSearchMISDetails"]')
+            print(Table)
+            if table_check==Table :
+                print("Ran into SECOND issue, SKIPPING rest of the code to re-execute the current iteration.")
+                continue
+            table_check = Table
+           
+            Tab1 = Table[0].text
+            Tab1 = Tab1.replace('Fruits & vegetables arrived nill & very less due to strike on 05/07/10(All India Closed)','')
+            Tab1 = Tab1.replace('up/mp/AGRA/MS','')
+            Tab1 = Tab1.replace('UP.MP','')
+            Tab1 = Tab1.replace('UP','')
+            Tab1 = Tab1.replace('Arrival of fresh potato from Punjab by rail','')
+            Tab1 = Tab1.replace('Arrival of fresh potato from Punjab','')
+            Tab1 = Tab1.replace('1rack arrival from punjab','')
+            Tab1 = Tab1.replace('100 Kilos','')
+            Tab1 = Tab1.replace('-1','')
+            Tab1 = Tab1.replace('-','')
+            Tab1 = Tab1.replace('`','')
+            Tab1 = Tab1.replace('wafer','')
+            Tab1 = Tab1.replace('WAFER','')
+            Tab1 = Tab1.replace('thu','')
+            Tab1 = Tab1.replace('wed','')
+            Tab1 = Tab1.replace('remark11','')
+            #ALL OF THESE REPLACE STATEMENTS PREVENT MESSY DATA COLLECTION DUE TO INCONSISTENT REMARKS
+
+            Tab1 = Tab1.split()
+            Tab2 = Tab1[18:]
+            N = int(len(Tab2)/11)
+            Records = list()
+            for i in range(N):
+                Records.extend([Tab2[(i*11):(i*11)+11]])
+            for i in range(N):
+                del Records[i][2:4]
+            for i in range(N):
+                Records[i][2:4] = [' '.join(Records[i][2:4])]
+            records = np.array(Records)
+            dataset = pd.DataFrame({'S.No.':records[:,0],'Centre Name':records[:,1],'Variety':records[:,2],'MinPrice(Rs/Qtl)':records[:,3],'MaxPrice(Rs/Qtl)':records[:,4],'ModalPrice(Rs/Qtl)':records[:,5],'Arrival(M.T.)':records[:,6],'RetailPrice(Rs/Qtl)':records[:,7],'Date': date[j]})
+            final_dataset = final_dataset.append(dataset)
+            j= j+1
+
+    return final_dataset
+    
+start_date = datetime.date(2019,1,1)
+end_date = datetime.date(2019,2,1)
+#THE DATES ARE ENTERED LIKE THIS BECAUSE THE FOLLOWING LOOP WILL GO THROUGH ALL THE MONTHS OF THE YEAR
+#THIS PRESERVES ALL THE DATA FROM HARM
+
+i=0
+while i<9:
+    day_count = int((end_date - start_date).days)
+    date = (dates(start_date,end_date))
+    print(date)
+    start_date = end_date
+    end_date = end_date + relativedelta(months=1)
+    x = WebScraper()
+    time.sleep(2)
+    final = final.append(x)
+    i = i+1
+
+print("WRITING THE FINAL DATAFRAME INTO THE EXCEL FILE")
+final.to_excel('PotatoNHB2019upto17thSept.xlsx', sheet_name = 'My Sheet')
